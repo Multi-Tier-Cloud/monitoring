@@ -1,20 +1,31 @@
 package main
 
+// Based on github.com/t-lin/ping-exporter
+
 import (
     "context"
     "errors"
+    "flag"
     "fmt"
+    "net/http"
     "os"
+    "strconv"
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
+
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promauto"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
 )
 
 // collect pings all peers in the monitor node's Peerstore to collect
 // performance data. For now it prints out what it finds
-func collect(node *p2pnode.Node, debug bool) {
+func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
+    host string, debug bool) {
+    
     // Loop infinitely
     for {
         // Get peer in Peerstore
@@ -36,17 +47,50 @@ func collect(node *p2pnode.Node, debug bool) {
                 continue
             }
             fmt.Println("ID:", id, "RTT:", result.RTT)
+
+            // Get Gauge object with id as targetHost
+            pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(id), host)
+            pingGauge.Set(float64(result.RTT) / 1000000) // Convert to ns to ms
         }
     }
 }
 
 func main() {
-    // Check for debug mode
-    debug := false
-    if len(os.Args) == 2 && os.Args[1] == "debug" {
-        debug = true
-        fmt.Println("Debug mode")
+    name := flag.String("name", "", "Name for labelling metrics (defaults to hostname)")
+    port := flag.Int("port", 8888, "Port to export metrics")
+    debug := flag.Bool("debug", false, "Debug mode")
+    flag.Parse()
+
+    // Default name as hostname
+    if *name == "" {
+        var err error
+        *name, err = os.Hostname()
+        if err != nil {
+            panic(err)
+        }
     }
+
+    // Prometheus metrics endpoint
+    pMetricsPath := "/metrics"
+    pListenAddress := ":" + strconv.Itoa(*port)
+
+    // Set up Prometheus GaugeVec object
+    pingGaugeVec := promauto.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "ping_rtt",
+            Help: "Historical ping RTTs over time (ms)",
+        },
+        []string{
+            "targetHost", // Specify ping target
+            "host",   // Name of host running ping-exporter
+        },
+    )
+    
+    // Map Prometheus metrics scrape path to handler function
+    http.Handle(pMetricsPath, promhttp.Handler())
+    
+    // Start server in separate goroutine
+    go http.ListenAndServe(pListenAddress, nil)
 
     // Setup node
     ctx := context.Background()
@@ -60,6 +104,6 @@ func main() {
     }
 
     fmt.Println("Starting data collection")
-    collect(&node, debug)
+    collect(&node, pingGaugeVec, *name, *debug)
     panic(errors.New("Monitor node exitted monitor loop"))
 }
