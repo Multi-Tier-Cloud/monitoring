@@ -44,6 +44,12 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
             result := <-responseChan
             if result.RTT == 0 {
                 fmt.Println("ID:", id, "Failed to ping, RTT = 0")
+
+                // Delete Gauge object
+                ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), host)
+                if !ok {
+                    fmt.Println("Failed to delete gauge")
+                }
                 continue
             }
             fmt.Println("ID:", id, "RTT:", result.RTT)
