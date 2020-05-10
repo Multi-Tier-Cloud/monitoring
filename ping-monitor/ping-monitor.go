@@ -26,6 +26,10 @@ import (
 func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
     host string, debug bool) {
     
+    // Setup new timer to allow one ping per second
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
+
     // Loop infinitely
     for {
         // Get peer in Peerstore
@@ -35,13 +39,15 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
                 fmt.Println("\nAddr:", node.Host.Peerstore().PeerInfo(id).Addrs)
             }
 
-            // Setup new timer to allow one ping per second
-            timer := time.NewTimer(1 * time.Second)
+            // Setup context
+            ctx, cancel := context.WithCancel(node.Ctx)
             // Block until timer fires
-            <-timer.C
-            // Ping and print result
-            responseChan := ping.Ping(node.Ctx, node.Host, id)
+            <-ticker.C
+            // Ping and get result
+            responseChan := ping.Ping(ctx, node.Host, id)
             result := <-responseChan
+            // Stop ping goroutine
+            cancel()
             if result.RTT == 0 {
                 fmt.Println("ID:", id, "Failed to ping, RTT = 0")
 
@@ -56,7 +62,7 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
 
             // Get Gauge object with id as targetHost
             pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(id), host)
-            pingGauge.Set(float64(result.RTT) / 1000000) // Convert to ns to ms
+            pingGauge.Set(float64(result.RTT) / 1000000) // Convert ns to ms
         }
     }
 }
