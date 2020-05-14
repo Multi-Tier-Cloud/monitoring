@@ -25,7 +25,7 @@ import (
 // performance data. For now it prints out what it finds
 func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
     host string, debug bool) {
-    
+
     // Setup new timer to allow one ping per second
     ticker := time.NewTicker(1 * time.Second)
     defer ticker.Stop()
@@ -34,6 +34,10 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
     for {
         // Get peer in Peerstore
         for _, id := range node.Host.Peerstore().Peers() {
+            if id == node.Host.ID() {
+                continue
+            }
+
             // Print address info in debug mode
             if debug {
                 fmt.Println("\nAddr:", node.Host.Peerstore().PeerInfo(id).Addrs)
@@ -48,13 +52,13 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
             result := <-responseChan
             // Stop ping goroutine
             cancel()
-            if result.RTT == 0 {
-                fmt.Println("ID:", id, "Failed to ping, RTT = 0")
+            if result.Error != nil {
+                fmt.Println("ID:", id, "Failed to ping, error:", result.Error)
 
                 // Delete Gauge object
                 ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), host)
                 if !ok {
-                    fmt.Println("Failed to delete gauge")
+                    fmt.Println("Failed to delete gauge for ID:", id)
                 }
                 continue
             }
@@ -97,10 +101,10 @@ func main() {
             "host",   // Name of host running ping-exporter
         },
     )
-    
+
     // Map Prometheus metrics scrape path to handler function
     http.Handle(pMetricsPath, promhttp.Handler())
-    
+
     // Start server in separate goroutine
     go http.ListenAndServe(pListenAddress, nil)
 
