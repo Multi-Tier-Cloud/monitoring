@@ -13,6 +13,7 @@ import (
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
+    "github.com/libp2p/go-libp2p-core/peer"
 
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promauto"
@@ -21,60 +22,62 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2pnode"
 )
 
+var (
+    debug = flag.Bool("debug", false, "Debug mode")
+)
+
+// Context provided here must already has a deadline set
+func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID, pingGaugeVec *prometheus.GaugeVec, host string) {
+    // Ping and get result
+    responseChan := ping.Ping(ctx, node.Host, peer)
+    result := <-responseChan
+    if result.Error != nil {
+        fmt.Println("ID:", peer, "Failed to ping, error:", result.Error)
+
+        // Delete Gauge object
+        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(peer), host)
+        if !ok {
+            fmt.Println("Failed to delete gauge for ID:", peer)
+        }
+        return
+    }
+
+    if (*debug) {
+        fmt.Println("ID:", peer, "RTT:", result.RTT)
+    }
+
+    // Get Gauge object with id as targetHost
+    pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(peer), host)
+    pingGauge.Set(float64(result.RTT) / 1000000) // Convert ns to ms
+}
+
 // collect pings all peers in the monitor node's Peerstore to collect
 // performance data. For now it prints out what it finds
 func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
     host string, debug bool) {
 
-    // Setup new timer to allow one ping per second
-    ticker := time.NewTicker(1 * time.Second)
-    defer ticker.Stop()
-
     // Loop infinitely
     for {
+        // Per-round context, used to trigger ping goroutines to stop
+        ctx, cancel := context.WithTimeout(node.Ctx, time.Second)
+
         // Get peer in Peerstore
         for _, id := range node.Host.Peerstore().Peers() {
             if id == node.Host.ID() {
                 continue
             }
 
-            // Print address info in debug mode
-            if debug {
-                fmt.Println("\nAddr:", node.Host.Peerstore().PeerInfo(id).Addrs)
-            }
-
-            // Setup context
-            ctx, cancel := context.WithCancel(node.Ctx)
-            // Block until timer fires
-            <-ticker.C
-            // Ping and get result
-            responseChan := ping.Ping(ctx, node.Host, id)
-            result := <-responseChan
-            // Stop ping goroutine
-            cancel()
-            if result.Error != nil {
-                fmt.Println("ID:", id, "Failed to ping, error:", result.Error)
-
-                // Delete Gauge object
-                ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), host)
-                if !ok {
-                    fmt.Println("Failed to delete gauge for ID:", id)
-                }
-                continue
-            }
-            fmt.Println("ID:", id, "RTT:", result.RTT)
-
-            // Get Gauge object with id as targetHost
-            pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(id), host)
-            pingGauge.Set(float64(result.RTT) / 1000000) // Convert ns to ms
+            go pingPeer(ctx, node, id, pingGaugeVec, host)
         }
+
+        <-ctx.Done()
+        cancel() // In case anyone isn't listening on Done()
     }
 }
 
 func main() {
     name := flag.String("name", "", "Name for labelling metrics (defaults to hostname)")
     port := flag.Int("port", 8888, "Port to export metrics")
-    debug := flag.Bool("debug", false, "Debug mode")
     flag.Parse()
 
     // Default name as hostname
