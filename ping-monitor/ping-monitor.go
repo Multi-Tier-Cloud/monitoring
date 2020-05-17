@@ -20,6 +20,7 @@ import (
     "github.com/prometheus/client_golang/prometheus/promhttp"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
+    "github.com/Multi-Tier-Cloud/monitoring/peerlastseen"
 )
 
 var (
@@ -27,20 +28,19 @@ var (
 )
 
 // Context provided here must already has a deadline set
-func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID, pingGaugeVec *prometheus.GaugeVec, host string) {
+func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
+        pingGaugeVec *prometheus.GaugeVec,
+        host string, pls *peerlastseen.PeerLastSeen) {
+
     // Ping and get result
     responseChan := ping.Ping(ctx, node.Host, peer)
     result := <-responseChan
     if result.Error != nil {
         fmt.Println("ID:", peer, "Failed to ping, error:", result.Error)
-
-        // Delete Gauge object
-        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(peer), host)
-        if !ok {
-            fmt.Println("Failed to delete gauge for ID:", peer)
-        }
         return
     }
+
+    pls.UpdateLastSeen(peer)
 
     if (*debug) {
         fmt.Println("ID:", peer, "RTT:", result.RTT)
@@ -54,7 +54,22 @@ func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID, pingGaugeVe
 // collect pings all peers in the monitor node's Peerstore to collect
 // performance data. For now it prints out what it finds
 func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
-    host string, debug bool) {
+    host string) {
+
+    callback := func(id peer.ID) {
+        // Delete Gauge object
+        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), host)
+        if !ok {
+            fmt.Println("Failed to delete gauge for ID:", id)
+        }
+    }
+
+    // Create PeerLastSeen with timeout of 10 minutes for peers (arbitrary at this point)
+    // TODO: Make the timeout configurable
+    pls, err := peerlastseen.NewPeerLastSeen(10 * time.Minute, callback)
+    if err != nil {
+        panic(err)
+    }
 
     // Loop infinitely
     for {
@@ -67,7 +82,7 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
                 continue
             }
 
-            go pingPeer(ctx, node, id, pingGaugeVec, host)
+            go pingPeer(ctx, node, id, pingGaugeVec, host, pls)
         }
 
         <-ctx.Done()
@@ -123,6 +138,6 @@ func main() {
     }
 
     fmt.Println("Starting data collection")
-    collect(&node, pingGaugeVec, *name, *debug)
+    collect(&node, pingGaugeVec, *name)
     panic(errors.New("Monitor node exitted monitor loop"))
 }
