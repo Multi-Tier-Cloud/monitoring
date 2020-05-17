@@ -62,7 +62,7 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
         ctx, cancel := context.WithTimeout(node.Ctx, time.Second)
 
         // Get peer in Peerstore
-        for _, id := range node.Host.Peerstore().Peers() {
+        for _, id := range node.Host.Network().Peers() {
             if id == node.Host.ID() {
                 continue
             }
