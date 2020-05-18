@@ -51,13 +51,17 @@ func NewPeerLastSeen(dur time.Duration, cb PeerLastSeenCB) (*PeerLastSeen, error
     return pls, nil
 }
 
-func (pls *PeerLastSeen) UpdateLastSeen(id peer.ID) {
+func (pls *PeerLastSeen) UpdateLastSeen(id peer.ID) error {
     now := time.Now()
+    if pls.cleanupActive == false {
+        return errors.New("Background clean-up goroutine is offline")
+    }
 
     pls.mutex.Lock()
     defer pls.mutex.Unlock()
 
     pls.lastSeen[id] = now
+    return nil
 }
 
 // Returns timestamp of when peer with given 'id' was last seen
@@ -65,7 +69,7 @@ func (pls *PeerLastSeen) UpdateLastSeen(id peer.ID) {
 // the map and we return the default 0-value
 func (pls *PeerLastSeen) LastSeen(id peer.ID) (time.Time, error) {
     if pls.cleanupActive == false {
-        return time.Time{}, errors.New("Background clean-up goroutine for PeerLastSeen is offline")
+        return time.Time{}, errors.New("Background clean-up goroutine is offline")
     }
 
     pls.mutex.RLock()
@@ -88,12 +92,13 @@ func (pls *PeerLastSeen) autoRemove() {
         pls.cleanupActive = false
     }()
 
-    // Currently hard-coded to check every second... is this too much?
-    // TODO: Think about how to make this more scalable using info from
-    //       the lastSeen map... perhaps manually set new ticks each time.
+    // Currently will check at intervals of *minimum* 1 second
+    // In reality the intervals may be larger, depending on how many peers
+    // are needed to be checked (range over all of 'lastSeen')
     ticker := time.NewTicker(time.Second)
     defer ticker.Stop()
 
+    doneRound := make(chan bool)
     for {
         <-ticker.C
 
@@ -103,6 +108,10 @@ func (pls *PeerLastSeen) autoRemove() {
         //
         // Could manually call Unlock(), but there's a chance of
         // a panic/crash, and Unlock() would never be called.
+        //
+        // Use 'doneRound' to signal when its safe to go to the next round,
+        // avoiding scenario where multiple clean-up goroutines will run
+        // if ranging over 'lastSeen' takes over 1 second.
         go func() {
             pls.mutex.Lock()
             defer pls.mutex.Unlock()
@@ -116,7 +125,11 @@ func (pls *PeerLastSeen) autoRemove() {
                     }
                 }
             }
+
+            doneRound <- true
         }()
+
+        <-doneRound
     }
 }
 
