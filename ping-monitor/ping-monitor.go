@@ -46,7 +46,7 @@ func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
         fmt.Println("ID:", peer, "RTT:", result.RTT)
     }
 
-    // Get Gauge object with id as targetHost
+    // Get Gauge object with peer id as targetHost
     pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(peer), host)
     pingGauge.Set(float64(result.RTT) / 1000000) // Convert ns to ms
 }
@@ -90,6 +90,24 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
     }
 }
 
+func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec, host string) {
+    ticker := time.NewTicker(time.Second)
+
+    for {
+        <-ticker.C
+
+        for _, id := range node.Host.Network().Peers() {
+            if id == node.Host.ID() {
+                continue
+            }
+
+            // Get Gauge object with peer id as targetHost
+            ewmaGauge := ewmaGaugeVec.WithLabelValues(fmt.Sprint(id), host)
+            ewmaGauge.Set(float64(node.Host.Peerstore().LatencyEWMA(id)) / 1000000) // Convert ns to ms
+        }
+    }
+}
+
 func main() {
     name := flag.String("name", "", "Name for labelling metrics (defaults to hostname)")
     port := flag.Int("port", 8888, "Port to export metrics")
@@ -108,11 +126,25 @@ func main() {
     pMetricsPath := "/metrics"
     pListenAddress := ":" + strconv.Itoa(*port)
 
-    // Set up Prometheus GaugeVec object
+    // Set up Prometheus GaugeVec object for raw RTTs to other peers
     pingGaugeVec := promauto.NewGaugeVec(
         prometheus.GaugeOpts{
             Name: "ping_rtt",
             Help: "Historical ping RTTs over time (ms)",
+        },
+        []string{
+            "targetHost", // Specify ping target
+            "host",   // Name of host running ping-exporter
+        },
+    )
+
+    // Set up Prometheus GaugeVec object EWMA RTTs to other peers
+    // The EWMA calculation is part of libp2p's PeerStore and the
+    // smoothing factor is hard-coded to 0.1.
+    ewmaGaugeVec := promauto.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "ping_ewma_rtt",
+            Help: "Exponentially weighted moving average of ping RTTs over time (ms)",
         },
         []string{
             "targetHost", // Specify ping target
@@ -137,6 +169,11 @@ func main() {
         panic(err)
     }
 
+    // Start background goroutine to constantly export the EWMA metric
+    go exportEWMAs(&node, ewmaGaugeVec, *name)
+
+    // Start pinging (each ping RTT sample will automatically re-calculate
+    // the EWMAs in the PeerStore).
     fmt.Println("Starting data collection")
     collect(&node, pingGaugeVec, *name)
     panic(errors.New("Monitor node exitted monitor loop"))
