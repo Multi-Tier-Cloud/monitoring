@@ -54,15 +54,9 @@ func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
 
 // collect pings all peers in the monitor node's Peerstore to collect
 // performance data. For now it prints out what it finds
-func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec) {
-
-    callback := func(id peer.ID) {
-        // Delete Gauge object
-        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), *hostname)
-        if !ok {
-            fmt.Println("Failed to delete gauge for ID:", id)
-        }
-    }
+func collect(node *p2pnode.Node,
+        pingGaugeVec *prometheus.GaugeVec,
+        callback peerlastseen.PeerLastSeenCB) {
 
     // Create PeerLastSeen with timeout of 10 minutes for peers (arbitrary at this point)
     // TODO: Make the timeout configurable
@@ -164,12 +158,26 @@ func main() {
         panic(err)
     }
 
-    // Start background goroutine to constantly export the EWMA metric
+    // Define callback for PeerLastSeen
+    expireMetrics := func(id peer.ID) {
+        // Delete Gauge objects
+        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), *hostname)
+        if !ok {
+            fmt.Printf("Failed to delete ping gauge for ID:", id)
+        }
+
+        ok = ewmaGaugeVec.DeleteLabelValues(fmt.Sprint(id), *hostname)
+        if !ok {
+            fmt.Printf("Failed to delete EWMA gauge for ID:", id)
+        }
+    }
+
+    // Start background goroutine to export the EWMA metric in PeerStore
     go exportEWMAs(&node, ewmaGaugeVec)
 
     // Start pinging (each ping RTT sample will automatically re-calculate
     // the EWMAs in the PeerStore).
     fmt.Println("Starting data collection")
-    collect(&node, pingGaugeVec)
+    collect(&node, pingGaugeVec, expireMetrics)
     panic(errors.New("Monitor node exitted monitor loop"))
 }
