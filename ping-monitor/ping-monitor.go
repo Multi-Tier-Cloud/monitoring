@@ -9,7 +9,6 @@ import (
     "fmt"
     "net/http"
     "os"
-    "strconv"
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
@@ -25,12 +24,14 @@ import (
 
 var (
     debug = flag.Bool("debug", false, "Debug mode")
+    hostname = flag.String("hostname", "", "Name for labelling metrics (defaults to hostname)")
+    promEndpoint = flag.String("prom-listen-addr", ":8888", "Listening address/endpoint for Prometheus to scrape")
 )
 
 // Context provided here must already has a deadline set
 func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
         pingGaugeVec *prometheus.GaugeVec,
-        host string, pls *peerlastseen.PeerLastSeen) {
+        pls *peerlastseen.PeerLastSeen) {
 
     // Ping and get result
     responseChan := ping.Ping(ctx, node.Host, peer)
@@ -47,18 +48,17 @@ func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
     }
 
     // Get Gauge object with peer id as targetHost
-    pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(peer), host)
+    pingGauge := pingGaugeVec.WithLabelValues(fmt.Sprint(peer), *hostname)
     pingGauge.Set(float64(result.RTT) / 1000000) // Convert ns to ms
 }
 
 // collect pings all peers in the monitor node's Peerstore to collect
 // performance data. For now it prints out what it finds
-func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
-    host string) {
+func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec) {
 
     callback := func(id peer.ID) {
         // Delete Gauge object
-        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), host)
+        ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), *hostname)
         if !ok {
             fmt.Println("Failed to delete gauge for ID:", id)
         }
@@ -82,7 +82,7 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
                 continue
             }
 
-            go pingPeer(ctx, node, id, pingGaugeVec, host, pls)
+            go pingPeer(ctx, node, id, pingGaugeVec, pls)
         }
 
         <-ctx.Done()
@@ -90,7 +90,7 @@ func collect(node *p2pnode.Node, pingGaugeVec *prometheus.GaugeVec,
     }
 }
 
-func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec, host string) {
+func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec) {
     ticker := time.NewTicker(time.Second)
 
     for {
@@ -102,29 +102,23 @@ func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec, host str
             }
 
             // Get Gauge object with peer id as targetHost
-            ewmaGauge := ewmaGaugeVec.WithLabelValues(fmt.Sprint(id), host)
+            ewmaGauge := ewmaGaugeVec.WithLabelValues(fmt.Sprint(id), *hostname)
             ewmaGauge.Set(float64(node.Host.Peerstore().LatencyEWMA(id)) / 1000000) // Convert ns to ms
         }
     }
 }
 
 func main() {
-    name := flag.String("name", "", "Name for labelling metrics (defaults to hostname)")
-    port := flag.Int("port", 8888, "Port to export metrics")
     flag.Parse()
 
     // Default name as hostname
-    if *name == "" {
+    if *hostname == "" {
         var err error
-        *name, err = os.Hostname()
+        *hostname, err = os.Hostname()
         if err != nil {
             panic(err)
         }
     }
-
-    // Prometheus metrics endpoint
-    pMetricsPath := "/metrics"
-    pListenAddress := ":" + strconv.Itoa(*port)
 
     // Set up Prometheus GaugeVec object for raw RTTs to other peers
     pingGaugeVec := promauto.NewGaugeVec(
@@ -153,10 +147,11 @@ func main() {
     )
 
     // Map Prometheus metrics scrape path to handler function
+    pMetricsPath := "/metrics" // Make configurable?
     http.Handle(pMetricsPath, promhttp.Handler())
 
     // Start server in separate goroutine
-    go http.ListenAndServe(pListenAddress, nil)
+    go http.ListenAndServe(*promEndpoint, nil)
 
     // Setup node
     ctx := context.Background()
@@ -170,11 +165,11 @@ func main() {
     }
 
     // Start background goroutine to constantly export the EWMA metric
-    go exportEWMAs(&node, ewmaGaugeVec, *name)
+    go exportEWMAs(&node, ewmaGaugeVec)
 
     // Start pinging (each ping RTT sample will automatically re-calculate
     // the EWMAs in the PeerStore).
     fmt.Println("Starting data collection")
-    collect(&node, pingGaugeVec, *name)
+    collect(&node, pingGaugeVec)
     panic(errors.New("Monitor node exitted monitor loop"))
 }
