@@ -26,6 +26,8 @@ import (
     "github.com/Multi-Tier-Cloud/common/util"
 )
 
+const defaultKeyFile = "~/.privKeyPing"
+
 var (
     debug = flag.Bool("debug", false, "Debug mode")
     hostname = flag.String("hostname", "", "Name for labelling metrics (defaults to hostname)")
@@ -113,7 +115,11 @@ func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec) {
 
 func main() {
     var err error
+    var keyFlags util.KeyFlags
     var bootstraps *[]multiaddr.Multiaddr
+    if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
+        log.Fatalln(err)
+    }
     if bootstraps, err = util.AddBootstrapFlags(); err != nil {
         log.Fatalln(err)
     }
@@ -160,10 +166,17 @@ func main() {
     // Start server in separate goroutine
     go http.ListenAndServe(*promEndpoint, nil)
 
+    // Create or load keys
+    priv, err := util.CreateOrLoadKey(keyFlags)
+    if err != nil {
+        log.Fatalln(err)
+    }
+
     // Setup node
     ctx := context.Background()
 
     config := p2pnode.NewConfig()
+    config.PrivKey = priv
     config.BootstrapPeers = *bootstraps
     node, err := p2pnode.NewNode(ctx, config)
     if err != nil {
