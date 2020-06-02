@@ -7,6 +7,7 @@ import (
     "errors"
     "flag"
     "fmt"
+    "log"
     "net/http"
     "os"
     "time"
@@ -18,15 +19,23 @@ import (
     "github.com/prometheus/client_golang/prometheus/promauto"
     "github.com/prometheus/client_golang/prometheus/promhttp"
 
+    "github.com/multiformats/go-multiaddr"
+
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/peerlastseen"
+    "github.com/Multi-Tier-Cloud/common/util"
 )
 
 var (
     debug = flag.Bool("debug", false, "Debug mode")
     hostname = flag.String("hostname", "", "Name for labelling metrics (defaults to hostname)")
-    promEndpoint = flag.String("prom-listen-addr", ":8888", "Listening address/endpoint for Prometheus to scrape")
+    promEndpoint = flag.String("prom-listen-addr", ":9100", "Listening address/endpoint for Prometheus to scrape")
 )
+
+func init() {
+    // Set up logging defaults
+    log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
+}
 
 // Context provided here must already has a deadline set
 func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
@@ -37,14 +46,14 @@ func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
     responseChan := ping.Ping(ctx, node.Host, peer)
     result := <-responseChan
     if result.Error != nil {
-        fmt.Println("ID:", peer, "Failed to ping, error:", result.Error)
+        log.Println("ID:", peer, "Failed to ping, error:", result.Error)
         return
     }
 
     pls.UpdateLastSeen(peer)
 
     if (*debug) {
-        fmt.Println("ID:", peer, "RTT:", result.RTT)
+        log.Println("ID:", peer, "RTT:", result.RTT)
     }
 
     // Get Gauge object with peer id as targetHost
@@ -103,11 +112,15 @@ func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec) {
 }
 
 func main() {
+    var err error
+    var bootstraps *[]multiaddr.Multiaddr
+    if bootstraps, err = util.AddBootstrapFlags(); err != nil {
+        log.Fatalln(err)
+    }
     flag.Parse()
 
     // Default name as hostname
     if *hostname == "" {
-        var err error
         *hostname, err = os.Hostname()
         if err != nil {
             panic(err)
@@ -151,8 +164,7 @@ func main() {
     ctx := context.Background()
 
     config := p2pnode.NewConfig()
-    // Set no rendezvous (anonymous mode)
-    config.Rendezvous = []string{}
+    config.BootstrapPeers = *bootstraps
     node, err := p2pnode.NewNode(ctx, config)
     if err != nil {
         panic(err)
@@ -163,12 +175,12 @@ func main() {
         // Delete Gauge objects
         ok := pingGaugeVec.DeleteLabelValues(fmt.Sprint(id), *hostname)
         if !ok {
-            fmt.Printf("Failed to delete ping gauge for ID:", id)
+            log.Printf("Failed to delete ping gauge for ID:", id)
         }
 
         ok = ewmaGaugeVec.DeleteLabelValues(fmt.Sprint(id), *hostname)
         if !ok {
-            fmt.Printf("Failed to delete EWMA gauge for ID:", id)
+            log.Printf("Failed to delete EWMA gauge for ID:", id)
         }
     }
 
@@ -177,7 +189,7 @@ func main() {
 
     // Start pinging (each ping RTT sample will automatically re-calculate
     // the EWMAs in the PeerStore).
-    fmt.Println("Starting data collection")
+    log.Println("Starting data collection")
     collect(&node, pingGaugeVec, expireMetrics)
     panic(errors.New("Monitor node exitted monitor loop"))
 }
