@@ -78,7 +78,7 @@ func collect(node *p2pnode.Node,
     // TODO: Make the timeout configurable
     pls, err := peerlastseen.NewPeerLastSeen(10 * time.Minute, callback)
     if err != nil {
-        panic(err)
+        log.Fatalln(err)
     }
 
     // Loop infinitely
@@ -196,7 +196,7 @@ func main() {
     if *hostname == "" {
         *hostname, err = os.Hostname()
         if err != nil {
-            panic(err)
+            log.Fatalln(err)
         }
     }
 
@@ -261,8 +261,19 @@ func main() {
     // Create new node
     node, err := p2pnode.NewNode(context.Background(), config)
     if err != nil {
-        panic(err)
+        log.Fatalln(err)
     }
+
+    // Print multiaddress (for copying and pasting to other services)
+	peerInfo := peer.AddrInfo{
+		ID:    node.Host.ID(),
+		Addrs: node.Host.Addrs(),
+	}
+	addrs, err := peer.AddrInfoToP2pAddrs(&peerInfo)
+	log.Println("P2P addresses for this node:")
+	for _, addr := range addrs {
+		log.Println("\t", addr)
+	}
 
     // Define callback for PeerLastSeen
     expireMetrics := func(id peer.ID) {
@@ -282,8 +293,9 @@ func main() {
     go exportEWMAs(&node, ewmaGaugeVec)
 
     // Start pinging (each ping RTT sample will automatically re-calculate
-    // the EWMAs in the PeerStore).
-    log.Println("Starting data collection")
+    // the EWMAs in the PeerStore). The call to collect() should not return.
+    log.Println("Starting RTT collection from peers")
     collect(&node, pingGaugeVec, expireMetrics)
-    panic(errors.New("Monitor node exitted monitor loop"))
+
+    log.Fatalln(errors.New("Monitor node exitted monitor loop"))
 }
