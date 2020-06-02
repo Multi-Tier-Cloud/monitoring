@@ -10,10 +10,14 @@ import (
     "log"
     "net/http"
     "os"
+    "regexp"
+    "strconv"
+    "strings"
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
     "github.com/libp2p/go-libp2p-core/peer"
+    "github.com/libp2p/go-libp2p-core/pnet"
 
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promauto"
@@ -32,6 +36,7 @@ var (
     debug = flag.Bool("debug", false, "Debug mode")
     hostname = flag.String("hostname", "", "Name for labelling metrics (defaults to hostname)")
     promEndpoint = flag.String("prom-listen-addr", ":9100", "Listening address/endpoint for Prometheus to scrape")
+    p2pEndpoint = flag.String("p2p-listen-addr", ":4001", "Listening address/endpoing for the P2P node")
 )
 
 func init() {
@@ -113,16 +118,78 @@ func exportEWMAs(node *p2pnode.Node, ewmaGaugeVec *prometheus.GaugeVec) {
     }
 }
 
+// Validates an IPv4 TCP or UDP endpoint address
+func validateEndpoint(ep string) bool {
+    epSplit := strings.Split(ep, ":")
+    if len(epSplit) != 2 {
+        return false
+    }
+
+    ip, portStr := epSplit[0], epSplit[1]
+
+    // Validate IP
+    // Allow endpoints with just the port number (e.g. ":1234")
+    if ip != "" {
+        match, err := regexp.Match("[0-9.]", []byte(ip))
+        if match != true || err != nil {
+            return false
+        }
+
+        ipSplit := strings.Split(ip, ".")
+        if len(ipSplit) != 4 {
+            return false
+        }
+
+        for _, octetStr := range ipSplit {
+            octet, err := strconv.Atoi(octetStr)
+            if octet < 0 || octet > 255 || err != nil {
+                return false
+            }
+        }
+    }
+
+    // Validate port number
+    port, err := strconv.Atoi(portStr)
+    if err != nil {
+        return false
+    }
+
+    if port < 1 || port > 65535 {
+        return false
+    }
+
+    return true
+}
+
+func tcpEndpoint2MultiaddrStr(ep string) string {
+    if !validateEndpoint(ep) {
+        return ""
+    }
+
+    // Assume all checks on endpoint are done
+    epSplit := strings.Split(ep, ":")
+    ip, portStr := epSplit[0], epSplit[1]
+    if ip == "" {
+        ip = "0.0.0.0"
+    }
+
+    return fmt.Sprintf("/ip4/%s/tcp/%s", ip, portStr)
+}
+
 func main() {
     var err error
     var keyFlags util.KeyFlags
     var bootstraps *[]multiaddr.Multiaddr
+    var psk *pnet.PSK
     if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
         log.Fatalln(err)
     }
     if bootstraps, err = util.AddBootstrapFlags(); err != nil {
         log.Fatalln(err)
     }
+    if psk, err = util.AddPSKFlag(); err != nil {
+		log.Fatalln(err)
+	}
     flag.Parse()
 
     // Default name as hostname
@@ -164,6 +231,9 @@ func main() {
     http.Handle(pMetricsPath, promhttp.Handler())
 
     // Start server in separate goroutine
+    if !validateEndpoint(*promEndpoint) {
+        log.Fatalf("ERROR: Invalid listening address provided (%s)\n", *promEndpoint)
+    }
     go http.ListenAndServe(*promEndpoint, nil)
 
     // Create or load keys
@@ -172,13 +242,24 @@ func main() {
         log.Fatalln(err)
     }
 
-    // Setup node
-    ctx := context.Background()
-
+    // Setup node configuration
     config := p2pnode.NewConfig()
     config.PrivKey = priv
-    config.BootstrapPeers = *bootstraps
-    node, err := p2pnode.NewNode(ctx, config)
+    config.PSK = *psk
+
+    if !validateEndpoint(*p2pEndpoint) {
+        log.Fatalf("ERROR: Invalid listening address provided (%s)\n", *p2pEndpoint)
+    }
+    config.ListenAddrs = append(config.ListenAddrs, tcpEndpoint2MultiaddrStr(*p2pEndpoint))
+
+    if len(*bootstraps) != 0 {
+        // This node should connect to a pre-existing bootstrap as part of
+        // a larger network. It should also still be a bootstrap itself.
+        config.BootstrapPeers = *bootstraps
+    }
+
+    // Create new node
+    node, err := p2pnode.NewNode(context.Background(), config)
     if err != nil {
         panic(err)
     }
