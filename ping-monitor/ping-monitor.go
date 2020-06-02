@@ -19,7 +19,7 @@ import (
     "github.com/prometheus/client_golang/prometheus/promhttp"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
-    "github.com/Multi-Tier-Cloud/monitoring/peerlastseen"
+    "github.com/Multi-Tier-Cloud/common/peerlastseen"
 )
 
 var (
