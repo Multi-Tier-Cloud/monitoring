@@ -16,6 +16,7 @@ import (
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
+    "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/pnet"
 
@@ -274,6 +275,20 @@ func main() {
 	for _, addr := range addrs {
 		log.Println("\t", addr)
 	}
+
+    // Register notification functions (for printing when peers connect
+    // or disconnect), mostly for diagnostics purposes
+    netCallbacks := network.NotifyBundle{}
+    netCallbacks.ConnectedF = func(net network.Network, conn network.Conn) {
+        fmt.Printf("\nNew connection to peer %s (%s)\n",
+            conn.RemotePeer(), conn.RemoteMultiaddr())
+    }
+    netCallbacks.DisconnectedF = func(net network.Network, conn network.Conn) {
+        fmt.Printf("\nDisconnected from peer %s (%s)\n",
+            conn.RemotePeer(), conn.RemoteMultiaddr())
+    }
+
+    node.Host.Network().Notify(&netCallbacks)
 
     // Define callback for PeerLastSeen
     expireMetrics := func(id peer.ID) {
