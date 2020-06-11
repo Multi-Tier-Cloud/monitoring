@@ -14,6 +14,7 @@ import (
 )
 
 // finds target host's mean and median rtt over last 5 min
+// target_host is the p2p hash
 //TODO: try with weights
 func FindRtt(target_host string) (float64, float64) {
     client, err := api.NewClient(api.Config{
@@ -60,4 +61,74 @@ func FindRtt(target_host string) (float64, float64) {
     //fmt.Printf("mean is %v median is %v\n", mean, median)
 
     return mean, median
+}
+
+// finds system cpu usage with 2 points over 15s
+// host_machine (e.g. tr-core-2)
+func FindCpu(host_machine string) (float64) {
+    client, err := api.NewClient(api.Config{
+        Address: "http://10.11.17.24:7777",
+    })
+    if err != nil {
+        fmt.Printf("Error creating client: %v\n", err)
+        os.Exit(1)
+    }
+
+    v1api := v1.NewAPI(client)
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    host_machine += "-health"
+    query := "100*(1-irate(node_cpu_seconds_total{job='"+host_machine+"',mode='idle'}[15s]))"
+
+    result, warnings, err := v1api.Query(ctx, query, time.Now())
+    if err != nil {
+        fmt.Printf("Error querying Prometheus: %v\n", err)
+        os.Exit(1)
+    }
+    if len(warnings) > 0 {
+        fmt.Printf("Warnings: %v\n", warnings)
+    }
+
+    results := strings.Split(result.String(), " ")
+    cpu, _ := strconv.ParseFloat(results[len(results)-2], 64)
+    //fmt.Println(results)
+    //fmt.Println(cpu)
+
+    return cpu
+}
+
+// finds system ram usage avg over 15s
+// host_machine (e.g. tr-core-2)
+func FindMemory(host_machine string) (float64) {
+    client, err := api.NewClient(api.Config{
+        Address: "http://10.11.17.24:7777",
+    })
+    if err != nil {
+        fmt.Printf("Error creating client: %v\n", err)
+        os.Exit(1)
+    }
+
+    v1api := v1.NewAPI(client)
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    host_machine += "-health"
+    query := "100*(1-((avg_over_time(node_memory_Buffers_bytes{job='"+host_machine+"'}[15s])+avg_over_time(node_memory_MemFree_bytes{job='"+host_machine+"'}[15s])+avg_over_time(node_memory_Cached_bytes{job='"+host_machine+"'}[15s]))/avg_over_time(node_memory_MemTotal_bytes{job='"+host_machine+"'}[15s])))"
+
+    result, warnings, err := v1api.Query(ctx, query, time.Now())
+    if err != nil {
+        fmt.Printf("Error querying Prometheus: %v\n", err)
+        os.Exit(1)
+    }
+    if len(warnings) > 0 {
+        fmt.Printf("Warnings: %v\n", warnings)
+    }
+
+    results := strings.Split(result.String(), " ")
+    mem, _ := strconv.ParseFloat(results[len(results)-2], 64)
+    //fmt.Println(results)
+    //fmt.Println(mem)
+
+    return mem
 }
