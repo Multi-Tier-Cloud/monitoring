@@ -14,11 +14,11 @@ import (
 )
 
 // finds target host's mean and median rtt over last 5 min
-// target_host is the p2p hash
+// addr is prometheus ip:port, target_host is the p2p hash
 //TODO: try with weights
-func FindRtt(target_host string) (float64, float64) {
+func FindRtt(addr string, target_host string) (float64, float64) {
     client, err := api.NewClient(api.Config{
-        Address: "http://10.11.17.24:7777",
+        Address: "http://"+addr,
     })
     if err != nil {
         fmt.Printf("Error creating client: %v\n", err)
@@ -53,21 +53,18 @@ func FindRtt(target_host string) (float64, float64) {
         rtt, _ := strconv.ParseFloat(time, 64)
         list = append(list, rtt)
     }
-    //fmt.Printf("%v\n %d\n", list, len(list))
 
     mean, _ := stats.Mean(list)
     median, _ := stats.Median(list)
-
-    //fmt.Printf("mean is %v median is %v\n", mean, median)
 
     return mean, median
 }
 
 // finds system cpu usage with 2 points over 15s
-// host_machine (e.g. tr-core-2)
-func FindCpu(host_machine string) (float64) {
+// addr is prometheus ip:port, host_machine is the vm name
+func FindCpu(addr string, host_machine string) (float64) {
     client, err := api.NewClient(api.Config{
-        Address: "http://10.11.17.24:7777",
+        Address: "http://"+addr,
     })
     if err != nil {
         fmt.Printf("Error creating client: %v\n", err)
@@ -92,17 +89,15 @@ func FindCpu(host_machine string) (float64) {
 
     results := strings.Split(result.String(), " ")
     cpu, _ := strconv.ParseFloat(results[len(results)-2], 64)
-    //fmt.Println(results)
-    //fmt.Println(cpu)
 
     return cpu
 }
 
 // finds system ram usage avg over 15s
-// host_machine (e.g. tr-core-2)
-func FindMemory(host_machine string) (float64) {
+// addr is prometheus ip:port, host_machine is the vm name
+func FindMemory(addr string, host_machine string) (float64) {
     client, err := api.NewClient(api.Config{
-        Address: "http://10.11.17.24:7777",
+        Address: "http://"+addr,
     })
     if err != nil {
         fmt.Printf("Error creating client: %v\n", err)
@@ -127,8 +122,6 @@ func FindMemory(host_machine string) (float64) {
 
     results := strings.Split(result.String(), " ")
     mem, _ := strconv.ParseFloat(results[len(results)-2], 64)
-    //fmt.Println(results)
-    //fmt.Println(mem)
 
     return mem
 }
