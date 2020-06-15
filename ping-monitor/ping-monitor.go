@@ -58,7 +58,11 @@ func pingPeer(ctx context.Context, node *p2pnode.Node, peer peer.ID,
         return
     }
 
-    pls.UpdateLastSeen(peer)
+    err := pls.UpdateLastSeen(peer)
+    if err != nil {
+        log.Printf("WARNING: Unable to update last seen for peer %s\n%v\n", peer, err)
+        return
+    }
 
     if (*debug) {
         log.Println("ID:", peer, "RTT:", result.RTT)
@@ -266,15 +270,14 @@ func main() {
     }
 
     // Print multiaddress (for copying and pasting to other services)
-	peerInfo := peer.AddrInfo{
-		ID:    node.Host.ID(),
-		Addrs: node.Host.Addrs(),
-	}
-	addrs, err := peer.AddrInfoToP2pAddrs(&peerInfo)
-	log.Println("P2P addresses for this node:")
-	for _, addr := range addrs {
-		log.Println("\t", addr)
-	}
+    log.Println("P2P addresses for this node:")
+    addrs, err := util.Whoami(node.Host)
+    if err != nil {
+        log.Fatalln(err)
+    }
+    for _, addr := range addrs {
+        log.Println("\t", addr)
+    }
 
     // Register notification functions (for printing when peers connect
     // or disconnect), mostly for diagnostics purposes
