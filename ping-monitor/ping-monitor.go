@@ -26,9 +26,9 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
-    "github.com/Multi-Tier-Cloud/common/peerlastseen"
-    "github.com/Multi-Tier-Cloud/common/util"
+    "github.com/PhysarumSM/common/p2pnode"
+    "github.com/PhysarumSM/common/peerlastseen"
+    "github.com/PhysarumSM/common/util"
 )
 
 const defaultKeyFile = "~/.privKeyPing"

@@ -20,6 +20,8 @@ github.com/Multi-Tier-Cloud/common v0.9.0 h1:0iYjL4OdTy+2vD1h6feVlvwchJyBj0Zie9Q
 github.com/Multi-Tier-Cloud/common v0.9.0/go.mod h1:X4dcy0HbJNKazhNRSVGQyvZ97jetSbRweI6W9K/iTb4=
 github.com/OneOfOne/xxhash v1.2.2 h1:KMrpdQIwFcEqXDklaen+P1axHaj9BSKzvpUUfnHldSE=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
+github.com/PhysarumSM/common v0.10.0 h1:KzT8opnAIRg4dTNjkjkkUosOoWb6z2k+Z3fE9f8mbbQ=
+github.com/PhysarumSM/common v0.10.0/go.mod h1:1zDVbt3Y/FoKK1b5C1/I+GrgauuP8r5DGhaEwyjbZnY=
 github.com/Stebalien/go-bitfield v0.0.0-20180330043415-076a62f9ce6e/go.mod h1:3oM7gXIttpYDAJXpVNnSCiUMYBLIZ6cb1t+Ip982MRo=
 github.com/Stebalien/go-bitfield v0.0.1 h1:X3kbSSPUaJK60wV2hjOPZwmpljr6VGCqdq4cBLhbQBo=
 github.com/Stebalien/go-bitfield v0.0.1/go.mod h1:GNjFpasyUVkHMsfEOk8EFLJ9syQ6SI+XWrX9Wf2XH0s=
