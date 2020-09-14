@@ -30,9 +30,8 @@ jobs:
 
     - name: Build ping-monitor
       run: |
-        cd ping-monitor
-        go build -v .
+        go build -v ./...
 
-#    - name: Test
-#      run: go test -v .
+    - name: Test
+      run: go test -v ./...
 
